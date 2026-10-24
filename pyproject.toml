@@ -1,0 +1,31 @@
+[project]
+name = "prax-rag"
+version = "0.1.0"
+description = "Enterprise RAG application: pgVector + Vertex AI (Gemini LLM + text embeddings)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy>=2.0",
+    "pgvector",
+    "psycopg[binary]",
+    "pydantic-settings",
+    "python-multipart",
+    "google-genai",
+    "pypdf",
+    "python-docx",
+    "pymupdf",
+    "pymupdf4llm",
+    "rapidocr-onnxruntime",
+    "onnxruntime",
+    "numpy",
+]
+
+[project.optional-dependencies]
+ui = [
+    "streamlit",
+    "requests",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*", "prax_kb*"]

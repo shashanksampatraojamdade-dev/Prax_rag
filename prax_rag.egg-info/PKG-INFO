@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: prax-rag
+Version: 0.1.0
+Summary: Enterprise RAG application: pgVector + Vertex AI (Gemini LLM + text embeddings)
+Requires-Python: >=3.12
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: sqlalchemy>=2.0
+Requires-Dist: pgvector
+Requires-Dist: psycopg[binary]
+Requires-Dist: pydantic-settings
+Requires-Dist: python-multipart
+Requires-Dist: google-genai
+Requires-Dist: pypdf
+Requires-Dist: python-docx
+Provides-Extra: ui
+Requires-Dist: streamlit; extra == "ui"
+Requires-Dist: requests; extra == "ui"
