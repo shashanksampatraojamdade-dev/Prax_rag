@@ -107,6 +107,53 @@ def build_kb_settings() -> str:
     return "\n".join(rows)
 
 
+def build_qt_settings() -> str:
+    """Query-transformation knobs, auto-synced into docs/QUERY_TRANSFORMATION.md."""
+    from app.core.config import Settings
+
+    qt_fields = [
+        "enable_query_transformation",
+        "enable_query_rewriting",
+        "enable_query_expansion",
+        "query_expansion_terms",
+        "enable_multi_query",
+        "multi_query_count",
+        "enable_hyde",
+        "enable_query_classification",
+        "enable_query_routing",
+        "query_routes",
+        "enable_intent_detection",
+        "enable_multi_hop",
+        "max_hops",
+        "query_single_call",
+        "query_max_workers",
+    ]
+    rows = ["| Env var | Default | Purpose |", "|---|---|---|"]
+    for name in qt_fields:
+        field = Settings.model_fields.get(name)
+        if field is None:
+            continue
+        env = name.upper()
+        note = field.description or ""
+        rows.append(f"| `{env}` | `{field.default}` | {note} |")
+    return "\n".join(rows)
+
+
+def build_qt_modules() -> str:
+    """Module map of the prax_qt SDK package, auto-synced into its docs."""
+    pkg = ROOT / "prax_qt"
+    lines = ["```"]
+    for path in sorted(pkg.rglob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        rel = path.relative_to(ROOT)
+        doc = _module_docstring(path)
+        suffix = f"  # {doc}" if doc else ""
+        lines.append(f"{rel}{suffix}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -145,6 +192,8 @@ SECTION_BUILDERS = {
     "modules": build_module_map,
     "dependencies": build_dependencies,
     "kb_settings": build_kb_settings,
+    "qt_settings": build_qt_settings,
+    "qt_modules": build_qt_modules,
 }
 
 
@@ -166,7 +215,8 @@ def main() -> int:
 
     check_only = "--check" in sys.argv
     changed = []
-    for name in ("ARCHITECTURE.md", "DEVELOPMENT.md", "KB_IMPROVEMENTS.md"):
+    for name in ("ARCHITECTURE.md", "DEVELOPMENT.md", "KB_IMPROVEMENTS.md",
+                 "QUERY_TRANSFORMATION.md", "QUERY_TRANSFORMATION_FEATURES.md"):
         path = DOCS / name
         if not path.exists():
             continue

@@ -66,3 +66,27 @@ class LLMService:
         for chunk in stream:
             if chunk.text:
                 yield chunk.text
+
+    def complete(self, prompt: str, *, system: str | None = None) -> str:
+        """Generic single-shot text completion.
+
+        Satisfies the ``prax_qt.LanguageModel`` protocol so the query
+        transformation SDK can reuse this Vertex client for rewriting and
+        expansion. Unlike ``generate`` it carries no RAG system instruction.
+        """
+        client = get_vertex_client()
+        config = types.GenerateContentConfig(
+            temperature=0.2,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+        if system:
+            config.system_instruction = system
+        response = client.models.generate_content(
+            model=self._settings.llm_model,
+            contents=prompt,
+            config=config,
+        )
+        return (response.text or "").strip()

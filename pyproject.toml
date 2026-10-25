@@ -26,6 +26,11 @@ ui = [
     "streamlit",
     "requests",
 ]
+langchain = [
+    "langchain-core",
+    "langchain-postgres",
+    "langchain-google-vertexai",
+]
 
 [tool.setuptools.packages.find]
-include = ["app*", "prax_kb*"]
+include = ["app*", "prax_kb*", "prax_qt*", "prax_re*", "prax_re_lc*"]

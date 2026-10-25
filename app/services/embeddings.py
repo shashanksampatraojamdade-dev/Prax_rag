@@ -36,3 +36,8 @@ class EmbeddingService:
     def embed_query(self, text: str) -> list[float]:
         """Embed a single search query."""
         return self._embed([text], task_type="RETRIEVAL_QUERY")[0]
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        """Embed several search queries in one call (used for multi-probe retrieval)."""
+        logger.info("Embedding %d query probe(s)", len(texts))
+        return self._embed(texts, task_type="RETRIEVAL_QUERY")

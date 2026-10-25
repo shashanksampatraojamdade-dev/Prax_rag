@@ -1,6 +1,7 @@
 from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import Chunk, Document, Parent
@@ -17,6 +18,8 @@ class RetrievedChunk:
     content_type: str = "text"
     parent_id: int | None = None
     parent_content: str | None = None
+    uploaded_at: datetime | None = None
+    version: int = 1
 
 
 class VectorStore:
@@ -184,9 +187,76 @@ class VectorStore:
                 content_type=chunk.content_type,
                 parent_id=parent.id if parent is not None else None,
                 parent_content=parent.content if parent is not None else None,
+                uploaded_at=document.created_at,
+                version=document.version,
             )
             for chunk, document, parent, dist in results
         ]
+
+    def keyword_search(self, query: str, top_k: int) -> list[RetrievedChunk]:
+        """Lexical (keyword) search over chunk text using Postgres full-text.
+
+        Complements vector search for the "hybrid" strategy: exact terms, IDs,
+        codes and rare tokens that embeddings often miss. Ranks with
+        ``ts_rank_cd`` over ``websearch_to_tsquery``; the normalised rank is
+        mapped onto ``distance`` (``1 - rank``) so it is directly comparable to
+        the cosine-distance field used elsewhere. Falls back to an ``ILIKE``
+        match when the query has no usable tsquery terms.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+
+        tsvector = func.to_tsvector("english", Chunk.content)
+        tsquery = func.websearch_to_tsquery("english", query)
+        rank = func.ts_rank_cd(tsvector, tsquery).label("rank")
+        stmt = (
+            select(Chunk, Document, Parent, rank)
+            .join(Document, Chunk.document_id == Document.id)
+            .outerjoin(Parent, Chunk.parent_id == Parent.id)
+            .where(Document.is_archived.is_(False))
+            .where(tsvector.op("@@")(tsquery))
+            .order_by(rank.desc())
+            .limit(top_k)
+        )
+        rows = self._session.execute(stmt).all()
+
+        if not rows:
+            # Fallback: simple substring match so single-word / symbol queries
+            # (e.g. an invoice id) still return something to fuse.
+            like = f"%{query}%"
+            stmt = (
+                select(Chunk, Document, Parent)
+                .join(Document, Chunk.document_id == Document.id)
+                .outerjoin(Parent, Chunk.parent_id == Parent.id)
+                .where(Document.is_archived.is_(False))
+                .where(or_(Chunk.content.ilike(like)))
+                .limit(top_k)
+            )
+            rows = [(c, d, p, 0.5) for c, d, p in self._session.execute(stmt).all()]
+
+        max_rank = max((float(r) for *_rest, r in rows), default=0.0) or 1.0
+        results: list[RetrievedChunk] = []
+        for chunk, document, parent, r in rows:
+            # Normalise lexical rank to 0-1 then express as a distance so the
+            # fusion layer can treat it like the cosine-distance field.
+            score = min(1.0, float(r) / max_rank) if max_rank else 0.0
+            results.append(
+                RetrievedChunk(
+                    chunk_id=chunk.id,
+                    document_id=document.id,
+                    source=document.source,
+                    title=document.title,
+                    content=chunk.content,
+                    distance=1.0 - score,
+                    content_type=chunk.content_type,
+                    parent_id=parent.id if parent is not None else None,
+                    parent_content=parent.content if parent is not None else None,
+                    uploaded_at=document.created_at,
+                    version=document.version,
+                )
+            )
+        return results
 
     def count_documents(self) -> int:
         return self._session.query(Document).count()

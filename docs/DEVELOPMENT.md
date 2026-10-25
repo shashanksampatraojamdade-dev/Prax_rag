@@ -37,7 +37,6 @@ app/api/routes/health.py
 app/api/routes/ingest.py
 app/api/routes/query.py
 app/core/config.py
-app/core/hashing.py  # Content hashing used for deduplication, versioning and incremental indexing.
 app/core/logging.py
 app/core/vertex_client.py
 app/db/models.py
@@ -46,13 +45,13 @@ app/main.py
 app/repositories/vector_store.py
 app/schemas/documents.py
 app/schemas/query.py
-app/services/chunking.py  # Knowledge-base chunking.
 app/services/embeddings.py
-app/services/ingestion.py
+app/services/ingestion.py  # Thin host-side wrapper around the prax_kb KnowledgeBase SDK.
+app/services/kb_adapters.py  # Adapters binding the backend-agnostic prax_kb SDK to this app's stack.
 app/services/llm.py
-app/services/loaders.py  # Layout-aware text extraction from uploaded documents.
-app/services/profiling.py  # Adaptive chunk sizing.
+app/services/qt_adapters.py  # Adapters binding the backend-agnostic prax_qt SDK to this app's stack.
 app/services/rag.py
+app/services/re_adapters.py  # Adapters that plug this app's pgvector + Vertex backends into ``prax_re``.
 ```
 <!-- /AUTOGEN:modules -->
 
@@ -73,7 +72,7 @@ app/services/rag.py
 | `API_PREFIX` | str | `/api/v1` |  |
 | `VERTEX_PROJECT` | str | `pid-gousenad-enen-gpaig-01` |  |
 | `VERTEX_LOCATION` | str | `global` |  |
-| `LLM_MODEL` | str | `gemini-3.8-flash` |  |
+| `LLM_MODEL` | str | `gemini-3.8-flash-lite` |  |
 | `EMBEDDING_MODEL` | str | `text-embedding-005` |  |
 | `EMBEDDING_DIM` | int | `768` |  |
 | `POSTGRES_HOST` | str | `localhost` |  |
@@ -84,6 +83,14 @@ app/services/rag.py
 | `CHUNK_SIZE` | int | `800` | Max characters per chunk. |
 | `CHUNK_OVERLAP` | int | `120` | Character overlap carried between adjacent chunks. |
 | `RETRIEVAL_TOP_K` | int | `5` | Number of nearest chunks retrieved per query. |
+| `ENABLE_HYBRID_RETRIEVAL` | bool | `True` | Fuse semantic (vector) + keyword (lexical) retrieval via RRF. |
+| `ENABLE_KEYWORD_RETRIEVAL` | bool | `True` | Include Postgres full-text keyword search in hybrid retrieval. |
+| `RETRIEVAL_CANDIDATE_K` | int | `10` | Candidates each retriever returns before fusion. |
+| `RRF_K` | int | `60` | Reciprocal Rank Fusion constant for combining hybrid results. |
+| `IDK_THRESHOLD` | float | `0.5` | Minimum answer confidence (0-1) to answer; below it the engine declines ('I don't know') instead of hallucinating. 0 = always answer. |
+| `ENABLE_COMPRESSION` | bool | `True` | Contextual compression: trim retrieved chunks to only the query-relevant sentences before answering (saves tokens, boosts precision). |
+| `COMPRESSION_MAX_SENTENCES` | int | `4` | Max sentences kept per chunk during contextual compression. |
+| `COMPRESSION_MIN_OVERLAP` | float | `0.1` | Min fraction of query terms a sentence must share to be kept during contextual compression. |
 | `CHUNK_STRATEGY` | str | `semantic` | Chunking strategy: 'semantic' (embedding breakpoints) or 'recursive'. |
 | `SEMANTIC_BREAKPOINT_PERCENTILE` | float | `90.0` | Sentence-distance percentile at which semantic chunking starts a new chunk. |
 | `ENABLE_OCR` | bool | `True` | Run RapidOCR on scanned pages and images embedded in text PDFs. |
@@ -93,6 +100,21 @@ app/services/rag.py
 | `ENABLE_VERSIONING` | bool | `True` | Version documents by source and archive older versions so retrieval ignores them. |
 | `ENABLE_INCREMENTAL` | bool | `True` | Reuse embeddings for unchanged chunks when re-indexing a modified document. |
 | `ENABLE_ADAPTIVE_CHUNKING` | bool | `True` | Pick smaller chunks for dense/legal docs and larger chunks for narrative docs. |
+| `ENABLE_QUERY_TRANSFORMATION` | bool | `True` | Master switch: transform each query before retrieval using the prax_qt SDK. |
+| `ENABLE_QUERY_REWRITING` | bool | `True` | Rewrite vague/conversational questions into clear, search-friendly queries. |
+| `ENABLE_QUERY_EXPANSION` | bool | `True` | Expand queries with synonyms, expanded acronyms and related terms. |
+| `QUERY_EXPANSION_TERMS` | int | `6` | Maximum number of related terms query expansion adds to a query. |
+| `ENABLE_MULTI_QUERY` | bool | `True` | Generate alternative phrasings of the query and merge their retrieval hits. |
+| `MULTI_QUERY_COUNT` | int | `3` | Number of alternative query phrasings generated for multi-query retrieval. |
+| `ENABLE_HYDE` | bool | `True` | HyDE: draft a hypothetical answer and retrieve real documents similar to it. |
+| `ENABLE_QUERY_CLASSIFICATION` | bool | `True` | Classify the query (exact_lookup/semantic/analytical/multi_hop) to adapt retrieval. |
+| `ENABLE_QUERY_ROUTING` | bool | `True` | Route the query to the best retrieval target among QUERY_ROUTES. |
+| `QUERY_ROUTES` | str | `knowledge_base` | Comma-separated candidate retrieval routes for adaptive routing. |
+| `ENABLE_INTENT_DETECTION` | bool | `True` | Detect the answer format the user wants (fact/summary/explanation/comparison/list). |
+| `ENABLE_MULTI_HOP` | bool | `True` | Plan multi-hop retrieval: decompose chained questions into ordered sub-queries. |
+| `MAX_HOPS` | int | `3` | Maximum number of sub-queries in a multi-hop retrieval plan. |
+| `QUERY_SINGLE_CALL` | bool | `True` | Run all query-understanding techniques in one LLM call (~8x faster). |
+| `QUERY_MAX_WORKERS` | int | `8` | Thread-pool size for the per-technique path: independent techniques run concurrently in two waves. Set to 1 for sequential. |
 <!-- /AUTOGEN:settings -->
 
 Settings are defined once in `app/core/config.py` and accessed through the

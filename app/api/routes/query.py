@@ -51,7 +51,7 @@ def query_stream(
         for event in service.answer_stream(
             question=payload.question, top_k=payload.top_k
         ):
-            yield f"data: {json.dumps(event)}\n\n"
+            yield f"data: {json.dumps(event, default=str)}\n\n"
 
     return StreamingResponse(
         event_generator(),

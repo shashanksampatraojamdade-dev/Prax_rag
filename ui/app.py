@@ -27,19 +27,57 @@ def api_error(exc: Exception) -> str:
     return str(exc)
 
 
+def format_source(s: dict) -> str:
+    """Render one citation: title, path, upload date, version, score, preview."""
+    title = s["title"] or s["source"]
+    uploaded = s.get("uploaded_at")
+    when = str(uploaded).replace("T", " ")[:19] if uploaded else "unknown date"
+    version = s.get("version", 1)
+    return (
+        f"**[{s['rank']}] {title}** · score `{s['score']}`\n\n"
+        f"- 📄 Path: `{s['source']}`\n"
+        f"- 🕒 Uploaded: `{when}`  ·  version `v{version}`\n\n"
+        f"> {s['preview']}"
+    )
+
+
 def stream_answer(question: str, top_k: int):
     """Generator for st.write_stream; captures sources & timings into session."""
     st.session_state.pending_sources = []
     st.session_state.pending_timings = None
+    st.session_state.pending_confidence = None
+    st.session_state.pending_mode = None
     for event in api.query_stream(question, top_k=top_k):
         etype = event.get("type")
         if etype == "sources":
             st.session_state.pending_sources = event.get("sources", [])
+            st.session_state.pending_mode = event.get("retrieval_mode")
+            if event.get("confidence") is not None:
+                st.session_state.pending_confidence = (
+                    event.get("confidence"),
+                    event.get("confidence_label", ""),
+                )
         elif etype == "token":
             yield event.get("text", "")
         elif etype == "done":
             st.session_state.pending_timings = event.get("timings")
+            if event.get("retrieval_mode"):
+                st.session_state.pending_mode = event.get("retrieval_mode")
+            if event.get("confidence") is not None:
+                st.session_state.pending_confidence = (
+                    event.get("confidence"),
+                    event.get("confidence_label", ""),
+                )
             return
+
+
+def confidence_caption(c: tuple | None, mode: str | None = None) -> str:
+    if not c:
+        return ""
+    score, label = c
+    emoji = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(label, "⚪️")
+    mode_txt = f" · 🔎 {mode} retrieval" if mode else ""
+    return f"{emoji} Confidence: **{score:.0%}** ({label}){mode_txt}"
 
 
 def timing_caption(t: dict | None) -> str:
@@ -133,14 +171,12 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+        if msg.get("confidence"):
+            st.caption(confidence_caption(msg["confidence"], msg.get("mode")))
         if msg.get("sources"):
             with st.expander(f"📎 Sources ({len(msg['sources'])})"):
                 for s in msg["sources"]:
-                    title = s["title"] or s["source"]
-                    st.markdown(
-                        f"**[{s['rank']}] {title}** · score `{s['score']}` · "
-                        f"`{s['source']}`\n\n> {s['preview']}"
-                    )
+                    st.markdown(format_source(s))
 
 # Chat input
 if prompt := st.chat_input("Ask a question about your knowledge base..."):
@@ -151,6 +187,10 @@ if prompt := st.chat_input("Ask a question about your knowledge base..."):
     with st.chat_message("assistant"):
         try:
             answer = st.write_stream(stream_answer(prompt, top_k))
+            confidence = st.session_state.get("pending_confidence")
+            mode = st.session_state.get("pending_mode")
+            if confidence:
+                st.caption(confidence_caption(confidence, mode))
             timings = st.session_state.get("pending_timings")
             if timings:
                 st.caption(timing_caption(timings))
@@ -158,15 +198,13 @@ if prompt := st.chat_input("Ask a question about your knowledge base..."):
             if sources:
                 with st.expander(f"📎 Sources ({len(sources)})"):
                     for s in sources:
-                        title = s["title"] or s["source"]
-                        st.markdown(
-                            f"**[{s['rank']}] {title}** · score `{s['score']}` · "
-                            f"`{s['source']}`\n\n> {s['preview']}"
-                        )
+                        st.markdown(format_source(s))
             st.session_state.messages.append(
                 {
                     "role": "assistant",
                     "content": answer,
+                    "confidence": confidence,
+                    "mode": mode,
                     "sources": sources,
                     "timings": timings,
                 }
